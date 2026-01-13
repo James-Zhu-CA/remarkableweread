@@ -79,5 +79,9 @@ Desktop.ini
 vendor/*/
 qt6-src/
 
-# Archive directory (contains development history and sensitive info)
+# Archive and docs directories (contain development history and sensitive info)
 archive/
+docs/
+
+# Keep only essential documentation
+!docs/lessons_learned.md
