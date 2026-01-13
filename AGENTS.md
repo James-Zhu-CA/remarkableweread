@@ -35,14 +35,14 @@ src/
 docker exec qt6-arm-builder bash -c "cd /workspace/src && cmake --build build-cross"
 
 # 部署到运行中的设备（正确方式）
-sshpass -p 'QpEXvfq2So' scp src/build-cross/WereadEinkBrowser root@10.11.99.1:/tmp/WereadEinkBrowser.new
-sshpass -p 'QpEXvfq2So' ssh root@10.11.99.1 "cp /tmp/WereadEinkBrowser.new /home/root/weread/WereadEinkBrowser"
+sshpass -p 'YOUR_PASSWORD' scp src/build-cross/WereadEinkBrowser root@10.11.99.1:/tmp/WereadEinkBrowser.new
+sshpass -p 'YOUR_PASSWORD' ssh root@10.11.99.1 "cp /tmp/WereadEinkBrowser.new /home/root/weread/WereadEinkBrowser"
 # 验证部署成功
-sshpass -p 'QpEXvfq2So' ssh root@10.11.99.1 "stat -c '%Y' /home/root/weread/WereadEinkBrowser"
+sshpass -p 'YOUR_PASSWORD' ssh root@10.11.99.1 "stat -c '%Y' /home/root/weread/WereadEinkBrowser"
 ```
 
 ### 设备信息
-- **IP**: `10.11.99.1` | **User**: `root` | **Pass**: `QpEXvfq2So`
+- **IP**: `10.11.99.1` | **User**: `root` | **Pass**: `YOUR_PASSWORD`
 - **应用目录**: `/home/root/weread/`
 - **日志**: `/home/root/weread/logs/`
 
