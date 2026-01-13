@@ -12,7 +12,32 @@
 - **网络**: 设备与开发机在同一局域网
 - **SSH访问**: 已启用SSH并获取root密码
 
-### 一键安装
+### 方法1：下载预编译包（最快，推荐）
+
+```bash
+# 1. 下载预编译包
+# 访问：https://github.com/James-Zhu-CA/remarkableweread/releases/latest
+# 下载：weread-runtime-v3.0.tar.gz
+
+# 2. 上传到设备
+scp weread-runtime-v3.0.tar.gz root@10.11.99.1:/home/root/
+
+# 3. SSH到设备并安装
+ssh root@10.11.99.1
+cd /home/root
+tar -xzf weread-runtime-v3.0.tar.gz
+cd weread-runtime-v3.0
+chmod +x install.sh
+./install.sh
+
+# 4. 启动应用
+systemctl stop xochitl
+./WereadEinkBrowser
+```
+
+安装完成后，应用会自动启动。
+
+### 方法2：一键部署脚本（从源码）
 
 ```bash
 # 1. 克隆项目
