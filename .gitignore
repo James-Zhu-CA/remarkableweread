@@ -90,3 +90,6 @@ docs/
 AGENTS.md
 GITHUB_PUBLISH.md
 READY_TO_PUBLISH.md
+
+# Release binaries (too large for GitHub)
+release/
