@@ -85,3 +85,8 @@ docs/
 
 # Keep only essential documentation
 !docs/lessons_learned.md
+
+# Internal development documentation
+AGENTS.md
+GITHUB_PUBLISH.md
+READY_TO_PUBLISH.md
