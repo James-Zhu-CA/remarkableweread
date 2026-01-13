@@ -1,0 +1,14 @@
+{
+  "name": "WeRead",
+  "application": "/home/root/weread/run-weread-qtfb-window.sh",
+  "environment": {
+    "QT_QPA_PLATFORM": "linuxfb:fb=/dev/fb0:size=954x1696:depth=16",
+    "QT_PLUGIN_PATH": "/home/root/weread/qt6/plugins:/usr/lib/plugins",
+    "QML2_IMPORT_PATH": "/home/root/weread/qt6/qml",
+    "LD_LIBRARY_PATH": "/home/root/weread/qt6/lib:/usr/lib:/lib"
+  },
+  "qtfb": true,
+  "aspectRatio": "move",
+  "disablesWindowedMode": true,
+  "icon": "/home/root/xovi/exthome/appload/weread-viewer/icon.png"
+}

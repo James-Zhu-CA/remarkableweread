@@ -1,0 +1,17 @@
+WeRead E-Ink Browser v2.0
+Created: 2025-12-10 21:48:39
+
+Frontend: WereadEinkBrowser
+- main.cpp: 152KB (2,580 lines)
+- shm_writer.cpp/h: Shared memory writer
+
+Backend: epaper_shm_viewer
+- main.cpp: 36KB (~19K lines)
+- main.qml: QML UI definition
+
+Key Features:
+- Dedao book pages: Kindle UA, Zoom 2.0
+- Scroll-based page turning (no wakeUp flash)
+- Fixed 6-frame capture schedule for page turns
+- Ready monitoring (relaxed for non-book pages)
+

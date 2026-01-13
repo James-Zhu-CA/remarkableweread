@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore xovi-tripletap service
+After=local-fs.target
+RequiresMountsFor=/home
+
+[Service]
+Type=oneshot
+ExecStart=/home/root/xovi-tripletap/auto-restore.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
