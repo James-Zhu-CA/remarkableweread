@@ -78,3 +78,6 @@ Desktop.ini
 # Large vendor directories (already in submodules)
 vendor/*/
 qt6-src/
+
+# Archive directory (contains development history and sensitive info)
+archive/
