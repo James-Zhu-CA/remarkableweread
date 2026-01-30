@@ -60,6 +60,7 @@ private:
   static constexpr qreal PAN_THRESHOLD = 50.0;       // pan 触发阈值
   static constexpr qreal TAP_BOUNCE_DISTANCE = 40.0; // tap 抖动容差
   static constexpr qreal SWIPE_MIN_DISTANCE = 100.0; // swipe 最小距离
+  static constexpr qreal LEFT_EDGE_SWIPE_THRESHOLD = 100.0; // 左侧边缘阈值
   static constexpr qreal DUPLICATE_POS_TOL = 12.0;   // 重复事件位置容差
   static constexpr qreal SYNTH_MOUSE_POS_TOL = 20.0; // 合成鼠标匹配触摸位置容差
 
@@ -77,6 +78,26 @@ private:
   // true=书籍页面（处理所有手势），false=非书籍页面（只处理底部向上滑动退出）
   bool handleContactUp(const QPointF &pos, bool isBookPage = true);
 
+  // ==================== 微信读书专用手势处理 ====================
+
+  // WeRead-specific gesture handlers
+  bool handleWeReadContactDown(const QPointF &pos);
+  bool handleWeReadContactMove(const QPointF &pos);
+  bool handleWeReadContactUp(const QPointF &pos);
+
+  // ==================== 得到专用手势处理 ====================
+
+  // Dedao-specific gesture handlers
+  bool handleDedaoContactDown(const QPointF &pos);
+  bool handleDedaoContactMove(const QPointF &pos);
+  bool handleDedaoContactUp(const QPointF &pos);
+
+  // ==================== 全局手势处理 ====================
+
+  // Handle global gestures (bottom swipe up, right edge swipe left)
+  bool handleGlobalGestures(const QPointF &startPos, const QPointF &endPos,
+                            qint64 durationMs, GestureState state);
+
   // ==================== 辅助函数 ====================
 
   // 计算方向 (参考 KOReader Contact:getPath)
@@ -87,7 +108,8 @@ private:
 
   static bool isSamePosition(const QPointF &a, const QPointF &b, qreal tol);
 
-  bool isDuplicatePointerEvent(QEvent::Type type, const QPointF &pos, qint64 nowMs) const;
+  bool isDuplicatePointerEvent(QEvent::Type type, const QPointF &pos,
+                               qint64 nowMs) const;
 
   void recordPointerEvent(QEvent::Type type, const QPointF &pos, qint64 nowMs);
 
@@ -120,6 +142,11 @@ private:
   QEvent::Type m_lastPointerType = QEvent::None;
   QPointF m_lastPointerPos;
   qint64 m_lastPointerMs = -1;
+  bool m_dedaoPanSuppressScroll = false;
+  bool m_holdPassThroughCandidate = false;
+  bool m_holdPassThroughActive = false;
+  bool m_holdPassThroughInjected = false;
+  QPointF m_holdPassThroughPos;
 };
 
 // GlobalInputLogger 已移除：所有功能已由 GestureFilter 统一处理

@@ -18,25 +18,33 @@ EinkRefreshHelper::~EinkRefreshHelper() {
 }
 
 void EinkRefreshHelper::refreshFull(int w, int h) {
-  qInfo() << "[EINK] Full refresh (GC16 FULL)" << w << "x" << h;
+  if (qEnvironmentVariableIsSet("WEREAD_EINK_DEBUG")) {
+    qInfo() << "[EINK] Full refresh (GC16 FULL)" << w << "x" << h;
+  }
   triggerRegion(0, 0, w, h, WAVE_GC16, MODE_FULL, false);
   resetCounters();
 }
 
 void EinkRefreshHelper::refreshPartial(int x, int y, int w, int h) {
-  qInfo() << "[EINK] Partial refresh (GL16)" << x << y << w << h;
+  if (qEnvironmentVariableIsSet("WEREAD_EINK_DEBUG")) {
+    qInfo() << "[EINK] Partial refresh (GL16)" << x << y << w << h;
+  }
   triggerRegion(x, y, w, h, WAVE_GL16, MODE_PARTIAL, false);
   m_partialCount++;
 }
 
 void EinkRefreshHelper::refreshUI(int x, int y, int w, int h) {
-  qInfo() << "[EINK] UI refresh (DU)" << x << y << w << h;
+  if (qEnvironmentVariableIsSet("WEREAD_EINK_DEBUG")) {
+    qInfo() << "[EINK] UI refresh (DU)" << x << y << w << h;
+  }
   triggerRegion(x, y, w, h, WAVE_DU, MODE_PARTIAL, false);
   m_partialCount++;
 }
 
 void EinkRefreshHelper::refreshA2(int x, int y, int w, int h) {
-  qInfo() << "[EINK] A2 refresh (fast scroll)" << x << y << w << h;
+  if (qEnvironmentVariableIsSet("WEREAD_EINK_DEBUG")) {
+    qInfo() << "[EINK] A2 refresh (fast scroll)" << x << y << w << h;
+  }
   triggerRegion(x, y, w, h, WAVE_A2, MODE_PARTIAL, false);
   m_a2Count++;
 }
@@ -46,11 +54,15 @@ void EinkRefreshHelper::refreshScroll(int w, int h) {
   m_lastRefreshTime.restart();
 
   if (elapsed < 200) {
-    qInfo() << "[EINK] Fast scroll (A2)" << elapsed << "ms since last";
+    if (qEnvironmentVariableIsSet("WEREAD_EINK_DEBUG")) {
+      qInfo() << "[EINK] Fast scroll (A2)" << elapsed << "ms since last";
+    }
     triggerRegion(0, 0, w, h, WAVE_A2, MODE_PARTIAL, false);
     m_a2Count++;
   } else {
-    qInfo() << "[EINK] Normal scroll (GL16)" << elapsed << "ms since last";
+    if (qEnvironmentVariableIsSet("WEREAD_EINK_DEBUG")) {
+      qInfo() << "[EINK] Normal scroll (GL16)" << elapsed << "ms since last";
+    }
     triggerRegion(0, 0, w, h, WAVE_GL16, MODE_PARTIAL, false);
     m_partialCount++;
   }
@@ -118,8 +130,11 @@ void EinkRefreshHelper::triggerRegion(int x, int y, int w, int h, int wave,
     }
   }
 
-  qInfo() << "[EINK]" << waveStr << modeStr << "region" << x << y << w << h
-          << "marker" << upd.update_marker << (waitComplete ? "(waited)" : "");
+  if (qEnvironmentVariableIsSet("WEREAD_EINK_DEBUG")) {
+    qInfo() << "[EINK]" << waveStr << modeStr << "region" << x << y << w << h
+            << "marker" << upd.update_marker
+            << (waitComplete ? "(waited)" : "");
+  }
 }
 
 void EinkRefreshHelper::resetCounters() {

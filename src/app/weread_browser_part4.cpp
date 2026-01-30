@@ -137,8 +137,11 @@ void WereadBrowser::keepAliveNearChapterEndWithRetry() {
               // 如果JS重试函数不可用，降级为页面重载（仅作为最后手段）
               if (m_enableAutoReload &&
                   m_contentRetryCount >= MAX_CONTENT_RETRIES) {
-                qInfo() << "[RETRY] Falling back to page reload (last resort)";
+                qWarning() << "[RETRY] fallback reload (last resort) url"
+                           << currentUrl;
                 if (m_view) {
+                  recordNavReason(QStringLiteral("content_retry_reload"),
+                                  currentUrl);
                   m_view->reload();
                 }
               }
@@ -248,8 +251,9 @@ void WereadBrowser::maybeReloadAfterPingFail(int triggerCount) {
     }
     m_pingLastReloadMs = now;
     qWarning() << "[PING_RELOAD] trigger Reload after ping fail, count"
-               << triggerCount;
+               << triggerCount << "url" << currentUrl;
     if (m_view) {
+      recordNavReason(QStringLiteral("ping_reload"), currentUrl);
       m_view->reload();
     }
   }
@@ -376,4 +380,180 @@ void WereadBrowser::runDedaoProbe() {
         )";
     m_view->page()->runJavaScript(
         js, [](const QVariant &res) { qInfo() << "[DEDAO_PROBE]" << res; });
+  }
+
+
+void WereadBrowser::scheduleDedaoUiFixes() {
+    if (!isDedaoSite() || !m_view || !m_view->page())
+      return;
+    const int delays[] = {0, 800, 2000};
+    for (int delay : delays) {
+      QTimer::singleShot(delay, this, [this]() { runDedaoUiFixes(); });
+    }
+  }
+
+
+void WereadBrowser::runDedaoUiFixes() {
+    if (!isDedaoSite() || !m_view || !m_view->page())
+      return;
+    const QString js = QStringLiteral(R"JS(
+(() => {
+  const selectors = ['.iget-invoke-app-bar', '.invoke-app-btn'];
+  const hideEl = (el) => {
+    if (!el || el.__wrHidden) return false;
+    el.__wrHidden = true;
+    el.style.setProperty('display', 'none', 'important');
+    el.style.setProperty('visibility', 'hidden', 'important');
+    el.style.setProperty('opacity', '0', 'important');
+    el.style.setProperty('pointer-events', 'none', 'important');
+    return true;
+  };
+  const hideBySelector = () => {
+    let hidden = 0;
+    selectors.forEach((sel) => {
+      document.querySelectorAll(sel).forEach((el) => {
+        if (hideEl(el)) hidden++;
+      });
+    });
+    return hidden;
+  };
+  const first = hideBySelector();
+  let observed = 0;
+  const obs = new MutationObserver(() => {
+    observed += hideBySelector();
+  });
+  if (document.body) {
+    obs.observe(document.body, {childList: true, subtree: true});
+    setTimeout(() => obs.disconnect(), 10000);
+  }
+  return {
+    ok: first > 0 || observed > 0,
+    hidden: first + observed,
+    selectors
+  };
+})()
+)JS");
+    m_view->page()->runJavaScript(js, [](const QVariant &res) {
+      const auto map = res.toMap();
+      if (map.value(QStringLiteral("ok")).toBool()) {
+        qInfo() << "[DEDAO] hide app banner" << res;
+      }
+    });
+    const QString styleJs = QStringLiteral(R"JS(
+(() => {
+  const ids = ['__dedao_clear_bg', '__dedao_text_bold'];
+  const flags = {};
+  ids.forEach((id) => { flags[id] = !!document.getElementById(id); });
+  const ensureStyle = (id, cssText) => {
+    let style = document.getElementById(id);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = id;
+      style.textContent = cssText;
+      (document.head || document.documentElement).appendChild(style);
+      return true;
+    }
+    return false;
+  };
+    const injected = {
+    clearBg: ensureStyle(
+      '__dedao_clear_bg',
+      'html,body,#app,.app_content,.content,.iget-reader-book,.reader-book-wrapper,.reader-content,.reader-body{' +
+      'background:#fff !important;background-color:#fff !important;background-image:none !important;}'
+    ),
+    boldText: ensureStyle(
+      '__dedao_text_bold',
+      '.iget-reader-book *:not(.iconfont),' +
+      '.reader-book-wrapper *:not(.iconfont),' +
+      '.readerChapterContent *:not(.iconfont),' +
+      '.reader-content *:not(.iconfont),' +
+      '.reader-body *:not(.iconfont){' +
+      'text-shadow:0 0 0.6px rgba(0,0,0,0.85) !important;}'
+    )
+  };
+  ids.forEach((id) => { flags[id] = !!document.getElementById(id); });
+  const sample = document.querySelector('.iget-reader-book, .reader-content, .reader-body, .reader-book-wrapper');
+  const info = {ok:true, ids: flags};
+  if (sample && window.getComputedStyle) {
+    const st = getComputedStyle(sample);
+    info.sampleTag = sample.tagName || '';
+    info.sampleClass = sample.className || '';
+    info.fontFamily = st.fontFamily || '';
+    info.fontWeight = st.fontWeight || '';
+    info.textShadow = st.textShadow || '';
+    info.background = st.backgroundColor || '';
+    info.color = st.color || '';
+  }
+  info.injected = injected;
+  return info;
+})()
+)JS");
+    m_view->page()->runJavaScript(styleJs, [this](const QVariant &res) {
+      qInfo() << "[DEDAO_STYLE]" << res;
+    });
+  }
+
+void WereadBrowser::scheduleWeReadUiFixes() {
+    if (!m_view || !m_view->page())
+      return;
+    if (!currentUrl.host().contains(QStringLiteral("weread.qq.com"),
+                                    Qt::CaseInsensitive)) {
+      return;
+    }
+    const int delays[] = {0, 800, 2000};
+    for (int delay : delays) {
+      QTimer::singleShot(delay, this, [this]() { runWeReadUiFixes(); });
+    }
+  }
+
+
+void WereadBrowser::runWeReadUiFixes() {
+    if (!m_view || !m_view->page())
+      return;
+    if (!currentUrl.host().contains(QStringLiteral("weread.qq.com"),
+                                    Qt::CaseInsensitive)) {
+      return;
+    }
+    const QString js = QStringLiteral(R"JS(
+(() => {
+  const selectors = [
+    '.wr_index_page_header_download_wrapper',
+    '.wr_index_page_header_download_action'
+  ];
+  const hideEl = (el) => {
+    if (!el || el.__wrHidden) return false;
+    el.__wrHidden = true;
+    el.style.setProperty('display', 'none', 'important');
+    el.style.setProperty('visibility', 'hidden', 'important');
+    el.style.setProperty('opacity', '0', 'important');
+    el.style.setProperty('pointer-events', 'none', 'important');
+    return true;
+  };
+  const hideBySelector = () => {
+    let hidden = 0;
+    selectors.forEach((sel) => {
+      document.querySelectorAll(sel).forEach((el) => {
+        if (hideEl(el)) hidden++;
+      });
+    });
+    return hidden;
+  };
+  const first = hideBySelector();
+  let observed = 0;
+  const obs = new MutationObserver(() => {
+    observed += hideBySelector();
+  });
+  if (document.body) {
+    obs.observe(document.body, {childList: true, subtree: true});
+    setTimeout(() => obs.disconnect(), 10000);
+  }
+  return {ok: first > 0 || observed > 0, hidden: first + observed, selectors};
+})()
+)JS");
+    m_view->page()->runJavaScript(js, [](const QVariant &res) {
+      const auto map = res.toMap();
+      if (map.value(QStringLiteral("ok")).toBool()) {
+        qInfo() << "[WEREAD] hide download bar" << res;
+      }
+    });
   }

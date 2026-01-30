@@ -44,7 +44,7 @@ void WereadBrowser::initProfileAndView(const QUrl &url) {
             << "force" << forceClearCache << "marker" << cacheClearMarker;
   }
   // 安装请求拦截器，阻断字体 / 统计 / 媒体等资源
-  ResourceInterceptor *interceptor = new ResourceInterceptor(this);
+  ResourceInterceptor *interceptor = new ResourceInterceptor(this, this);
   m_profile->setUrlRequestInterceptor(interceptor);
   // 暂时移除所有注入脚本，排查 SyntaxError/空白根因（资源加载/缓存/上游）
   const QString uaDefault = m_profile->httpUserAgent();
@@ -64,13 +64,15 @@ void WereadBrowser::initProfileAndView(const QUrl &url) {
   const QString uaMode = QString::fromLatin1(uaModeEnv);
   const QByteArray bookModeEnv = qgetenv("WEREAD_BOOK_MODE");
   const QString bookMode = QString::fromLatin1(bookModeEnv);
-  // 默认 UA：统一使用 Kindle（非书籍页也走触摸友好 UA）
+  // 默认 UA：非书籍页使用桌面 UA，书籍页使用 Kindle UA
   Q_UNUSED(uaMode);
   Q_UNUSED(bookMode);
-  m_uaNonWeRead = m_kindleUA;
+  m_uaNonWeRead = m_desktopChromeUA;
   // 微信读书书籍页 UA：强制 Kindle，保证按钮/布局可控
   m_weReadBookMode = QStringLiteral("mobile");
   m_uaWeReadBook = m_kindleUA.isEmpty() ? m_uaNonWeRead : m_kindleUA;
+  // 得到书籍页 UA：独立使用 Android UA（移动端）
+  m_uaDedaoBook = androidUA;
   // 初始 UA 先按目标 URL 决定
   m_currentUA = QStringLiteral("unset");
   updateUserAgentForUrl(url);
@@ -78,7 +80,7 @@ void WereadBrowser::initProfileAndView(const QUrl &url) {
   qInfo() << "[UA] mode"
           << (uaMode.isEmpty() ? QStringLiteral("default") : uaMode)
           << "non-weRead" << m_uaNonWeRead << "weRead-book" << m_uaWeReadBook
-          << "bookMode" << m_weReadBookMode;
+          << "dedao-book" << m_uaDedaoBook << "bookMode" << m_weReadBookMode;
   qInfo() << "[PROFILE] data" << m_profile->persistentStoragePath() << "cache"
           << m_profile->cachePath() << "cookiesPolicy"
           << m_profile->persistentCookiesPolicy() << "offTheRecord"
@@ -107,47 +109,59 @@ void WereadBrowser::initProfileAndView(const QUrl &url) {
   m_view->setFocus(Qt::OtherFocusReason);
 
   // 安装触摸/鼠标日志过滤器，不改变事件流，仅记录
-  m_view->installEventFilter(new TouchLogger(m_view));
-  if (QWidget *proxy = m_view->focusProxy()) {
-    proxy->setAttribute(Qt::WA_AcceptTouchEvents, true);
-    proxy->setFocusPolicy(Qt::StrongFocus);
-    proxy->setFocus(Qt::OtherFocusReason);
-    proxy->installEventFilter(new TouchLogger(proxy));
-    qInfo() << "[TOUCH_EVT] focusProxy touch logger enabled";
-  } else {
-    qWarning() << "[TOUCH_EVT] focusProxy not found";
-  }
-  bool quickWidgetFound = false;
-  const QList<QWidget *> childWidgets = m_view->findChildren<QWidget *>();
-  for (QWidget *child : childWidgets) {
-    const char *className = child ? child->metaObject()->className() : nullptr;
-    if (className &&
-        QString::fromLatin1(className) == QStringLiteral("QQuickWidget")) {
-      quickWidgetFound = true;
-      child->setAttribute(Qt::WA_AcceptTouchEvents, true);
-      child->setFocusPolicy(Qt::StrongFocus);
-      child->installEventFilter(new TouchLogger(child));
-      qInfo() << "[TOUCH_EVT] QQuickWidget touch logger enabled" << className
-              << "name" << child->objectName();
+  // TouchLogger: 仅在设置 WEREAD_TOUCH_DEBUG=1 时启用（调试触摸问题用）
+  // 默认禁用以减少高频日志输出和事件过滤器开销
+  if (qEnvironmentVariableIsSet("WEREAD_TOUCH_DEBUG") &&
+      qEnvironmentVariableIntValue("WEREAD_TOUCH_DEBUG") != 0) {
+    m_view->installEventFilter(new TouchLogger(m_view));
+    if (QWidget *proxy = m_view->focusProxy()) {
+      proxy->setAttribute(Qt::WA_AcceptTouchEvents, true);
+      proxy->setFocusPolicy(Qt::StrongFocus);
+      proxy->setFocus(Qt::OtherFocusReason);
+      proxy->installEventFilter(new TouchLogger(proxy));
+      qInfo() << "[TOUCH_EVT] focusProxy touch logger enabled";
+    } else {
+      qWarning() << "[TOUCH_EVT] focusProxy not found";
     }
+    bool quickWidgetFound = false;
+    const QList<QWidget *> childWidgets = m_view->findChildren<QWidget *>();
+    for (QWidget *child : childWidgets) {
+      const char *className =
+          child ? child->metaObject()->className() : nullptr;
+      if (className &&
+          QString::fromLatin1(className) == QStringLiteral("QQuickWidget")) {
+        quickWidgetFound = true;
+        child->setAttribute(Qt::WA_AcceptTouchEvents, true);
+        child->setFocusPolicy(Qt::StrongFocus);
+        child->installEventFilter(new TouchLogger(child));
+        qInfo() << "[TOUCH_EVT] QQuickWidget touch logger enabled" << className
+                << "name" << child->objectName();
+      }
+    }
+    if (!quickWidgetFound) {
+      qWarning() << "[TOUCH_EVT] QQuickWidget not found under view";
+    }
+    qInfo() << "[TOUCH_EVT] touch logger enabled (WEREAD_TOUCH_DEBUG=1)";
+  } else {
+    qInfo() << "[TOUCH_EVT] touch logger disabled (set WEREAD_TOUCH_DEBUG=1 to "
+               "enable)";
   }
-  if (!quickWidgetFound) {
-    qWarning() << "[TOUCH_EVT] QQuickWidget not found under view";
-  }
-  qInfo() << "[TOUCH_EVT] touch logger enabled";
   installWeReadDefaultSettingsScript();
+  installDedaoDefaultSettingsScript();
   installChapterObserverScript();
 
   // 创建智能刷新管理器
   if (m_fbRef) {
-    m_smartRefresh = new SmartRefreshManager(m_fbRef, 954, 1696, this);
+    m_smartRefreshWeRead = new SmartRefreshManager(
+        m_fbRef, 954, 1696, QStringLiteral("weread"), this);
+    m_smartRefreshDedao = new SmartRefreshManager(
+        m_fbRef, 954, 1696, QStringLiteral("dedao"), this);
+    m_smartRefreshDedao->setPostClickA2Enabled(false);
     // 连接 RoutedPage 的智能刷新信号
     connect(routedPage, &RoutedPage::smartRefreshEvents, this,
             [this](const QString &json) {
               noteDomEventFromJson(json);
-              if (m_smartRefresh) {
-                m_smartRefresh->parseJsEvents(json);
-              }
+              handleSmartRefreshEvents(json);
             });
     connect(
         routedPage, &RoutedPage::chapterInfosMapped, this, [this](int count) {
@@ -168,11 +182,8 @@ void WereadBrowser::initProfileAndView(const QUrl &url) {
             }
           });
         });
-    connect(routedPage, &RoutedPage::smartRefreshBurstEnd, this, [this]() {
-      if (m_smartRefresh) {
-        m_smartRefresh->triggerBurstEnd();
-      }
-    });
+    connect(routedPage, &RoutedPage::smartRefreshBurstEnd, this,
+            [this]() { handleSmartRefreshBurstEnd(); });
     connect(routedPage, &RoutedPage::jsUnexpectedEnd, this,
             [this](const QString &msg, const QString &src) {
               handleJsUnexpected(msg, src);

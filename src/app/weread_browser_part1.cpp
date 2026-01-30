@@ -130,6 +130,22 @@ void WereadBrowser::injectKey(int key) {
   QCoreApplication::sendEvent(target, &release);
 }
 
+void WereadBrowser::injectKeyWithModifiers(int key,
+                                           Qt::KeyboardModifiers modifiers) {
+  if (!m_view)
+    return;
+  QWidget *target = m_view->focusProxy();
+  if (!target)
+    target = m_view;
+  if (!target->hasFocus()) {
+    target->setFocus(Qt::OtherFocusReason);
+  }
+  QKeyEvent press(QEvent::KeyPress, key, modifiers);
+  QKeyEvent release(QEvent::KeyRelease, key, modifiers);
+  QCoreApplication::sendEvent(target, &press);
+  QCoreApplication::sendEvent(target, &release);
+}
+
 QWebEngineView *WereadBrowser::view() const { return m_view; }
 
 void WereadBrowser::scrollByJs(int dy) {
@@ -140,13 +156,14 @@ void WereadBrowser::scrollByJs(int dy) {
   qInfo() << "[TOUCH] js scroll" << dy;
   scheduleBookCaptures();
   // 使用智能刷新管理器处理滚动刷新
-  if (m_smartRefresh) {
+  if (SmartRefreshManager *mgr = smartRefreshForPage()) {
     SmartRefreshManager::RefreshEvent e;
     e.type = SmartRefreshManager::RefreshEvent::SCROLL;
     e.scrollDelta = qAbs(dy);
     QTimer::singleShot(150, this, [this, e]() {
-      if (m_smartRefresh)
-        m_smartRefresh->pushEvent(e);
+      if (SmartRefreshManager *active = smartRefreshForPage()) {
+        active->pushEvent(e);
+      }
     });
   } else if (m_fbRef) {
     // 后备：直接调用 FbRefreshHelper
@@ -281,8 +298,8 @@ void WereadBrowser::goNextPage(const QPointF &inputPos) {
           << m_view->url();
 
   // 通知智能刷新管理器：点击操作，重置score阈值（仅在书籍页面生效）
-  if (m_smartRefresh) {
-    m_smartRefresh->resetScoreThreshold();
+  if (SmartRefreshManager *mgr = smartRefreshForPage()) {
+    mgr->resetScoreThreshold();
   }
 
   if (isDedaoBook()) {
@@ -398,8 +415,8 @@ void WereadBrowser::goPrevPage(const QPointF &inputPos) {
           << m_view->url();
 
   // 通知智能刷新管理器：点击操作，重置score阈值（仅在书籍页面生效）
-  if (m_smartRefresh) {
-    m_smartRefresh->resetScoreThreshold();
+  if (SmartRefreshManager *mgr = smartRefreshForPage()) {
+    mgr->resetScoreThreshold();
   }
 
   if (isDedaoBook()) {
@@ -465,6 +482,10 @@ void WereadBrowser::goPrevPage(const QPointF &inputPos) {
 void WereadBrowser::openCatalog() {
   if (!m_view || !m_view->page())
     return;
+  if (isDedaoBook()) {
+    openDedaoCatalog();
+    return;
+  }
   if (!isWeReadBook()) {
     qInfo() << "[MENU] catalog skipped (not WeRead book)";
     return;
@@ -852,6 +873,13 @@ void WereadBrowser::toggleFontFamily() {
 void WereadBrowser::toggleService() {
   if (!m_view || !m_view->page())
     return;
+  const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+  if (m_lastServiceToggleMs > 0 && (nowMs - m_lastServiceToggleMs) < 500) {
+    qInfo() << "[MENU] service toggle skipped (debounce)"
+            << (nowMs - m_lastServiceToggleMs) << "ms";
+    return;
+  }
+  m_lastServiceToggleMs = nowMs;
   m_firstFrameDone = false;
   m_reloadAttempts = 0;
   const QString cur = m_view->url().toString();
@@ -860,6 +888,8 @@ void WereadBrowser::toggleService() {
                             : QUrl(QStringLiteral("https://www.dedao.cn/"));
   qInfo() << "[MENU] service toggle"
           << (isDedao ? "dedao->weread" : "weread->dedao") << "next" << next;
+  recordNavReason(QStringLiteral("menu_toggle_service"), next);
+  m_view->page()->setProperty("allow_non_reader_nav_until", nowMs + 3000);
   m_view->load(next);
 }
 

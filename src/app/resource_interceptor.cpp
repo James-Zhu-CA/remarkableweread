@@ -1,4 +1,5 @@
 #include "resource_interceptor.h"
+#include "weread_browser.h"
 
 void ResourceInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
   const QString url = info.requestUrl().toString();
@@ -9,6 +10,10 @@ void ResourceInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
     switch (info.resourceType()) {
     case QWebEngineUrlRequestInfo::ResourceTypeMainFrame:
       return "MainFrame";
+    case QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadMainFrame:
+      return "NavPreloadMainFrame";
+    case QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadSubFrame:
+      return "NavPreloadSubFrame";
     case QWebEngineUrlRequestInfo::ResourceTypeSubFrame:
       return "SubFrame";
     case QWebEngineUrlRequestInfo::ResourceTypeStylesheet:
@@ -35,6 +40,10 @@ void ResourceInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
     switch (info.resourceType()) {
     case QWebEngineUrlRequestInfo::ResourceTypeMainFrame:
       return "MainFrame";
+    case QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadMainFrame:
+      return "NavPreloadMainFrame";
+    case QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadSubFrame:
+      return "NavPreloadSubFrame";
     case QWebEngineUrlRequestInfo::ResourceTypeSubFrame:
       return "SubFrame";
     case QWebEngineUrlRequestInfo::ResourceTypeStylesheet:
@@ -53,6 +62,26 @@ void ResourceInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
       return "Other";
     }
   };
+
+  if (info.resourceType() == QWebEngineUrlRequestInfo::ResourceTypeMainFrame ||
+      info.resourceType() ==
+          QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadMainFrame) {
+    const QUrl firstParty = info.firstPartyUrl();
+    const QUrl initiator = info.initiator();
+    const QUrl current = m_browser ? m_browser->currentUrlForLog() : QUrl();
+    const QString reason = m_browser ? m_browser->navReason() : QString();
+    const QUrl reasonTarget =
+        m_browser ? m_browser->navReasonTarget() : QUrl();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 reasonAge =
+        m_browser ? (now - m_browser->navReasonTs()) : -1;
+    qInfo() << "[RESOURCE_MAIN]" << "url" << url
+            << "navType" << info.navigationType()
+            << "firstParty" << firstParty << "initiator" << initiator
+            << "method" << info.requestMethod()
+            << "current" << current << "reason" << reason
+            << "reasonTarget" << reasonTarget << "reasonAgeMs" << reasonAge;
+  }
 
   // Block winktemplaterendersvr fonts/media (KaTeX related)
   if (url.contains(QStringLiteral("/winktemplaterendersvr/")) &&

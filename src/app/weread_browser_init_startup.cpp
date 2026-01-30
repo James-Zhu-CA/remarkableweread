@@ -12,8 +12,10 @@ void WereadBrowser::initStartupLoad(const QUrl &url) {
     const QUrl localUrl =
         QUrl::fromLocalFile(QString::fromLocal8Bit(localHtmlEnv));
     qInfo() << "[WEREAD] Loading local HTML for diagnostic:" << localUrl;
+    recordNavReason(QStringLiteral("startup_local_html"), localUrl);
     m_view->load(localUrl);
   } else {
+    recordNavReason(QStringLiteral("startup_url"), url);
     m_view->load(url);
   }
 }
@@ -95,7 +97,25 @@ void WereadBrowser::initMenuOverlay() {
   m_menu->raise();                                   // 确保菜单在最上层
   m_menuTimer.setInterval(5000);
   m_menuTimer.setSingleShot(true);
-  connect(&m_menuTimer, &QTimer::timeout, this, [this]() { m_menu->hide(); });
+  connect(&m_menuTimer, &QTimer::timeout, this, [this]() {
+    if (!m_menu) {
+      return;
+    }
+    const bool wasVisible = m_menu->isVisible();
+    m_menu->hide();
+    if (!wasVisible) {
+      return;
+    }
+    if (isDedaoBook()) {
+      if (SmartRefreshManager *mgr = smartRefreshForPage()) {
+        mgr->triggerDedaoDuRefresh(QStringLiteral("menu_hide"));
+        return;
+      }
+    }
+    if (m_fbRef) {
+      m_fbRef->refreshUI(0, 0, width(), height());
+    }
+  });
   // Disable periodic heartbeat captures to avoid重复抓帧
   m_heartbeatTimer.setInterval(0);
 
@@ -106,6 +126,10 @@ void WereadBrowser::initMenuOverlay() {
         [this](int index, const QString &uid) {
           if (!m_view || !m_view->page())
             return;
+          if (isDedaoBook()) {
+            handleDedaoCatalogClick(index, uid);
+            return;
+          }
           if (m_menu)
             m_menu->hide();
           if (m_catalogWidget)

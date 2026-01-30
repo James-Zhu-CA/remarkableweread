@@ -27,11 +27,12 @@ bool RoutedPage::acceptNavigationRequest(const QUrl &url, NavigationType type,
                                          bool isMainFrame) {
   if (!isMainFrame)
     return true;
+  const QString currentUrl = m_view ? m_view->url().toString() : QString();
   const qint64 ts = QDateTime::currentMSecsSinceEpoch();
   const qint64 rel = m_lastReloadTs ? (ts - m_lastReloadTs) : -1;
   qInfo() << "[NAV] request" << url << "type" << type << "mainFrame"
-          << isMainFrame << "ts" << ts << "sinceReload" << rel;
-  const QString currentUrl = m_view ? m_view->url().toString() : QString();
+          << isMainFrame << "ts" << ts << "sinceReload" << rel << "from"
+          << currentUrl;
   const bool inDedaoReader =
       currentUrl.contains(QStringLiteral("dedao.cn")) &&
       currentUrl.contains(QStringLiteral("/ebook/reader"));
@@ -41,6 +42,18 @@ bool RoutedPage::acceptNavigationRequest(const QUrl &url, NavigationType type,
                             target.contains(QStringLiteral("/ebook/reader"));
     const bool isDetail = target.contains(QStringLiteral("/ebook/detail"));
     if (!sameReader) {
+      const qint64 allowUntil =
+          property("allow_non_reader_nav_until").toLongLong();
+      const bool allowMenuToggle = allowUntil > 0 && ts <= allowUntil;
+      const bool isWeReadHome =
+          target == QStringLiteral("https://weread.qq.com/") ||
+          target == QStringLiteral("https://weread.qq.com");
+      if (allowMenuToggle && isWeReadHome) {
+        setProperty("allow_non_reader_nav_until", 0);
+        qInfo() << "[NAV] allow non-reader nav from dedao (menu toggle)"
+                << url << "ts" << ts << "sinceReload" << rel;
+        return true;
+      }
       qInfo() << "[NAV] block non-reader nav from dedao" << url << "ts" << ts
               << "sinceReload" << rel;
       return false;

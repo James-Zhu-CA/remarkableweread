@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QRect>
+#include <QString>
 #include <QTimer>
 #include <QVector>
 
@@ -55,10 +56,15 @@ public:
   };
 
   explicit SmartRefreshManager(FbRefreshHelper *fb, int w, int h,
+                               const QString &tag = QString(),
                                QObject *parent = nullptr);
+
+  QString tag() const { return m_tag; }
 
   void setPolicy(RefreshPolicy policy) { m_policy = policy; }
   RefreshPolicy policy() const { return m_policy; }
+
+  void setPostClickA2Enabled(bool enabled);
 
   void setBookPage(bool isBook);
   void resetScoreThreshold();
@@ -71,6 +77,11 @@ public:
   void triggerMenu();
   void triggerBurstEnd();
   void triggerContentReady();
+  void triggerDedaoDuRefresh(const QString &reason);
+  void scheduleDedaoFallbackSeries();
+  void cancelDedaoFallbacks();
+  void scheduleDedaoDelayedRefresh(const QString &reason);
+  void cancelDedaoDelayedRefresh();
 
   // 获取状态
   float ghostingRisk() const { return m_ghostingRisk; }
@@ -87,6 +98,10 @@ private:
   QRect mergeRegions();
   void executeRefresh(WaveformChoice wf, const QRect &region);
   void schedulePostClickA2();
+  void startDedaoScrollSeries();
+  void cancelDedaoScrollSeries();
+  void shiftDedaoFallbackAfterScrollSeries();
+  void updateDedaoFallbackPending();
 
   FbRefreshHelper *m_fb;
   int m_width, m_height;
@@ -118,10 +133,30 @@ private:
 
   // 点击翻页后的延迟 A2 刷新
   bool m_postClickA2Pending = false;
+  bool m_postClickA2Enabled = true;
   int m_postClickA2Count = 0;
   QTimer m_postClickA2Timer;
   static constexpr int kPostClickA2DelayMs = 1000;
   static constexpr int kMaxPostClickA2Count = 10;
+  static constexpr int kDedaoDuThrottleMs = 250;
+  static constexpr int kDedaoScrollSeriesIntervalMs = 1000;
+  static constexpr int kDedaoScrollSeriesCount = 5;
+  qint64 m_lastDedaoDuRefreshMs = 0;
+  QTimer m_dedaoFallback1s;
+  QTimer m_dedaoFallback2s;
+  QTimer m_dedaoFallback3s;
+  QTimer m_dedaoDelayedRefresh;
+  QTimer m_dedaoIdleRefresh;
+  QTimer m_dedaoMutationRefresh;
+  QTimer m_dedaoScrollSeriesTimer;
+  int m_dedaoScrollSeriesRemaining = 0;
+  int m_lastDedaoClickSeq = -1;
+  bool m_dedaoClickHandled = false;
+  bool m_dedaoBypassThrottleOnce = false;
+  bool m_dedaoFallbackPending = false;
+  bool m_dedaoFallbackShifted = false;
+
+  QString m_tag;
 };
 
 #endif // SMART_REFRESH_H

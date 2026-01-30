@@ -1,10 +1,23 @@
 #include "weread_browser.h"
+#include <QWebEngineLoadingInfo>
 
 void WereadBrowser::initLoadSignals()
 {
   connect(m_view, &QWebEngineView::loadStarted, this, [this](){
       const qint64 ts = QDateTime::currentMSecsSinceEpoch();
-      qInfo() << "[TIMING] loadStarted url" << currentUrl << "ts" << ts;
+      const qint64 reasonAge =
+          m_lastNavReasonTs > 0 ? (ts - m_lastNavReasonTs) : -1;
+      const QUrl viewUrl = m_view ? m_view->url() : QUrl();
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      const QUrl requestedUrl =
+          (m_view && m_view->page()) ? m_view->page()->requestedUrl() : QUrl();
+      qInfo() << "[TIMING] loadStarted url" << currentUrl << "ts" << ts
+              << "viewUrl" << viewUrl << "pageUrl" << pageUrl
+              << "requestedUrl" << requestedUrl
+              << "reason" << m_lastNavReason
+              << "reasonTarget" << m_lastNavReasonTarget
+              << "reasonAgeMs" << reasonAge;
       m_bookEarlyReloads = 0;
       m_iframeFixApplied = false;
       m_diagRan = false;
@@ -23,6 +36,138 @@ void WereadBrowser::initLoadSignals()
   connect(m_view, &QWebEngineView::loadProgress, this, [this](int p){
       const qint64 ts = QDateTime::currentMSecsSinceEpoch();
       qInfo() << "[TIMING] loadProgress" << p << "url" << currentUrl << "ts" << ts;
+  });
+
+  connect(m_view->page(), &QWebEnginePage::loadStarted, this, [this]() {
+      const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+      const qint64 reasonAge =
+          m_lastNavReasonTs > 0 ? (ts - m_lastNavReasonTs) : -1;
+      const QUrl viewUrl = m_view ? m_view->url() : QUrl();
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      const QUrl requestedUrl =
+          (m_view && m_view->page()) ? m_view->page()->requestedUrl() : QUrl();
+      qInfo() << "[PAGE] loadStarted"
+              << "ts" << ts << "viewUrl" << viewUrl << "pageUrl" << pageUrl
+              << "requestedUrl" << requestedUrl
+              << "reason" << m_lastNavReason
+              << "reasonTarget" << m_lastNavReasonTarget
+              << "reasonAgeMs" << reasonAge;
+      logHistoryState(QStringLiteral("pageLoadStarted"));
+  });
+
+  connect(m_view->page(), &QWebEnginePage::loadFinished, this,
+          [this](bool ok) {
+      const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+      const qint64 reasonAge =
+          m_lastNavReasonTs > 0 ? (ts - m_lastNavReasonTs) : -1;
+      const QUrl viewUrl = m_view ? m_view->url() : QUrl();
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      const QUrl requestedUrl =
+          (m_view && m_view->page()) ? m_view->page()->requestedUrl() : QUrl();
+      qInfo() << "[PAGE] loadFinished"
+              << "ok" << ok << "ts" << ts << "viewUrl" << viewUrl
+              << "pageUrl" << pageUrl << "requestedUrl" << requestedUrl
+              << "reason" << m_lastNavReason
+              << "reasonTarget" << m_lastNavReasonTarget
+              << "reasonAgeMs" << reasonAge;
+      logHistoryState(QStringLiteral("pageLoadFinished"));
+  });
+
+  connect(m_view->page(), &QWebEnginePage::loadingChanged, this,
+          [this](const QWebEngineLoadingInfo &info) {
+      const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+      const qint64 reasonAge =
+          m_lastNavReasonTs > 0 ? (ts - m_lastNavReasonTs) : -1;
+      const QUrl viewUrl = m_view ? m_view->url() : QUrl();
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      const QUrl requestedUrl =
+          (m_view && m_view->page()) ? m_view->page()->requestedUrl() : QUrl();
+      const auto status = info.status();
+      const char *statusStr = "unknown";
+      switch (status) {
+      case QWebEngineLoadingInfo::LoadStartedStatus:
+        statusStr = "started";
+        break;
+      case QWebEngineLoadingInfo::LoadStoppedStatus:
+        statusStr = "stopped";
+        break;
+      case QWebEngineLoadingInfo::LoadSucceededStatus:
+        statusStr = "succeeded";
+        break;
+      case QWebEngineLoadingInfo::LoadFailedStatus:
+        statusStr = "failed";
+        break;
+      }
+      const auto domain = info.errorDomain();
+      const char *domainStr = "unknown";
+      switch (domain) {
+      case QWebEngineLoadingInfo::NoErrorDomain:
+        domainStr = "none";
+        break;
+      case QWebEngineLoadingInfo::InternalErrorDomain:
+        domainStr = "internal";
+        break;
+      case QWebEngineLoadingInfo::ConnectionErrorDomain:
+        domainStr = "connection";
+        break;
+      case QWebEngineLoadingInfo::CertificateErrorDomain:
+        domainStr = "certificate";
+        break;
+      case QWebEngineLoadingInfo::HttpErrorDomain:
+        domainStr = "http";
+        break;
+      case QWebEngineLoadingInfo::FtpErrorDomain:
+        domainStr = "ftp";
+        break;
+      case QWebEngineLoadingInfo::DnsErrorDomain:
+        domainStr = "dns";
+        break;
+      case QWebEngineLoadingInfo::HttpStatusCodeDomain:
+        domainStr = "http_status";
+        break;
+      }
+      qInfo() << "[TIMING] loadingChanged"
+              << "status" << statusStr
+              << "url" << info.url()
+              << "isErrorPage" << info.isErrorPage()
+              << "errorDomain" << domainStr
+              << "errorCode" << info.errorCode()
+              << "errorString" << info.errorString()
+              << "ts" << ts
+              << "viewUrl" << viewUrl
+              << "pageUrl" << pageUrl
+              << "requestedUrl" << requestedUrl
+              << "reason" << m_lastNavReason
+              << "reasonTarget" << m_lastNavReasonTarget
+              << "reasonAgeMs" << reasonAge;
+      if (status == QWebEngineLoadingInfo::LoadSucceededStatus) {
+        if (m_dedaoCatalogJumpPending && isDedaoBook() && m_smartRefreshDedao) {
+          qInfo() << "[CATALOG_DEDAO] load succeeded after jump, refresh";
+          m_smartRefreshDedao->triggerDedaoDuRefresh(
+              QStringLiteral("catalog_nav"));
+          m_smartRefreshDedao->scheduleDedaoFallbackSeries();
+          m_dedaoCatalogJumpPending = false;
+        }
+      }
+      logHistoryState(QStringLiteral("loadingChanged"));
+  });
+
+  connect(m_view->page(), &QWebEnginePage::renderProcessTerminated, this,
+          [this](QWebEnginePage::RenderProcessTerminationStatus status,
+                 int exitCode) {
+      const qint64 ts = QDateTime::currentMSecsSinceEpoch();
+      const QUrl viewUrl = m_view ? m_view->url() : QUrl();
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      qInfo() << "[PROC] renderProcessTerminated"
+              << "status" << status
+              << "exitCode" << exitCode
+              << "ts" << ts
+              << "viewUrl" << viewUrl
+              << "pageUrl" << pageUrl;
   });
   
   // Phase 2: JavaScript console capture (via performance monitoring JS logs captured as console.log)
@@ -44,6 +189,74 @@ void WereadBrowser::initLoadSignals()
           sendBookState();
           if (isDedaoBook()) {
               ensureDedaoDefaults();
+          }
+          if (isDedaoSite() && !isDedaoBook()) {
+              const QUrl viewUrl = m_view ? m_view->url() : QUrl();
+              const QString host = viewUrl.host();
+              const QString path = viewUrl.path();
+              const bool isHome =
+                  host.endsWith(QStringLiteral("dedao.cn"),
+                                Qt::CaseInsensitive) &&
+                  (path.isEmpty() || path == QStringLiteral("/"));
+              if (isHome) {
+                  const QString js = QStringLiteral(R"JS(
+(() => {
+  if (!/dedao\.cn$/i.test(location.host || '')) return {ok:false, reason:'not-dedao-host'};
+  const path = location.pathname || '';
+  if (path && path !== '/') return {ok:false, reason:'not-home', path};
+  let setting = {};
+  let updated = false;
+  let raw = '';
+  try { raw = localStorage.getItem('readerSettings') || ''; } catch(e) { return {ok:false, reason:'localStorage-error', error:String(e)}; }
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') setting = parsed;
+    } catch(e) { setting = {}; }
+  }
+  const before = {fontLevel: setting.fontLevel, fontFamily: setting.fontFamily};
+  const rawLevel = setting.fontLevel;
+  let levelNum = null;
+  if (rawLevel !== null && rawLevel !== undefined && rawLevel !== '') {
+    const parsed = parseInt(rawLevel, 10);
+    if (!isNaN(parsed)) levelNum = parsed;
+  }
+  if (levelNum === null || levelNum < 1) {
+    setting.fontLevel = 7;
+    updated = true;
+  }
+  const currentFont = (setting.fontFamily || '').trim();
+  const currentLower = currentFont.toLowerCase();
+  const fontInvalid = !currentFont ||
+                      currentLower == "default" ||
+                      currentLower == "system" ||
+                      currentLower == "xitongziti";
+  if (fontInvalid) {
+    setting.fontFamily = 'HanYiQiHei';
+    updated = true;
+  }
+  if (updated) {
+    try { localStorage.setItem('readerSettings', JSON.stringify(setting)); }
+    catch(e) { return {ok:false, reason:'write-failed', error:String(e)}; }
+  }
+  return {ok:true, updated, before, after:{fontLevel: setting.fontLevel, fontFamily: setting.fontFamily}};
+})()
+)JS");
+                  m_view->page()->runJavaScript(
+                      js, [](const QVariant &res) {
+                        qInfo() << "[DEDAO_HOME_SETTINGS]" << res;
+                      });
+              }
+          }
+          if (isDedaoSite()) {
+              scheduleDedaoUiFixes();
+          }
+          scheduleWeReadUiFixes();
+
+          if (isWeReadBook() || isDedaoBook()) {
+              QTimer::singleShot(800, this, [this]() {
+                  logComputedFontOnce();
+              });
           }
           
           // 智能延迟重试：仅在书籍页面且未调度过检查时，延迟检查一次（低功耗）
@@ -118,115 +331,34 @@ void WereadBrowser::initLoadSignals()
           m_view->page()->runJavaScript(perfMonitorJs);
   }
   
+          const bool isWeReadBookPage = isWeReadBook();
+          const bool isDedaoBookPage = isDedaoBook();
+          const bool isDedaoSitePage = isDedaoSite();
           // Phase 4: 注入智能刷新 DOM 监听器（如果 urlChanged 中已注入则跳过）
-          // 注意：JS 中已有 __SMART_REFRESH_INSTALLED__ 检查，不会重复注入
-          const QString smartRefreshJs = QStringLiteral(R"(
-  (function() {
-  if (window.__SMART_REFRESH_INSTALLED__) {
-  return;
-  }
-  window.__SMART_REFRESH_INSTALLED__ = true;
-  
-  let pendingEvents = [];
-  let burstMode = false, burstTimeout = null;
-  let lastScrollTop = 0;
-  
-  // MutationObserver 检测 DOM 变化（优化：减少getBoundingClientRect调用，延迟处理区域计算）
-  let pendingMutations = [];
-  const processMutations = () => {
-  if (pendingMutations.length === 0) return;
-  const mutations = pendingMutations;
-  pendingMutations = [];
-  
-  let score = 0;
-  let regions = [];
-  for (const m of mutations) {
-      if (m.type === 'childList') {
-          score += m.addedNodes.length * 10 + m.removedNodes.length * 10;
-          // 优化：限制区域计算，只处理前5个节点，避免大量getBoundingClientRect调用影响点击响应
-          const maxNodes = 5;
-          let nodeCount = 0;
-          for (const n of m.addedNodes) {
-              if (nodeCount >= maxNodes) break;
-              if (n.nodeType === 1 && n.getBoundingClientRect) {
-                  try {
-                      const r = n.getBoundingClientRect();
-                      if (r.width > 0 && r.height > 0) {
-                          regions.push({x:r.x|0, y:r.y|0, w:Math.ceil(r.width), h:Math.ceil(r.height)});
-                          nodeCount++;
-                      }
-                  } catch(e) {}
+          if (isWeReadBookPage || isDedaoSitePage) {
+              QString smartRefreshFlag;
+              if (isWeReadBookPage) {
+                  smartRefreshFlag =
+                      QStringLiteral("__SMART_REFRESH_WR_INSTALLED__");
+              } else if (isDedaoBookPage) {
+                  smartRefreshFlag = QStringLiteral(
+                      "__SMART_REFRESH_DEDAO_READER_INSTALLED__");
+              } else {
+                  smartRefreshFlag =
+                      QStringLiteral("__SMART_REFRESH_DEDAO_SITE_INSTALLED__");
               }
+              installSmartRefreshScript(smartRefreshFlag);
+              const QString smartRefreshJs =
+                  buildSmartRefreshScript(smartRefreshFlag);
+              m_view->page()->runJavaScript(smartRefreshJs);
+              qInfo() << "[SMART_REFRESH] Injected JS monitor script "
+                         "(loadFinished)"
+                      << smartRefreshFlag;
           }
-      } else if (m.type === 'attributes') score += 2;
-      else if (m.type === 'characterData') score += 3;
-  }
-  
-  if (score > 0) {
-      pendingEvents.push({t:'dom', s:score, r:regions});
-  }
-  };
-  
-  const observer = new MutationObserver((mutations) => {
-  // 批量收集mutations，延迟处理以减少对点击响应的影响
-  pendingMutations.push(...mutations);
-  // 使用requestIdleCallback延迟处理，如果浏览器不支持则使用setTimeout
-  if (window.requestIdleCallback) {
-      requestIdleCallback(processMutations, {timeout: 50});
-  } else {
-      setTimeout(processMutations, 0);
-  }
-  });
-  
-  // 延迟启动观察器，等待 body 准备就绪
-  const startObserver = () => {
-  if (document.body) {
-      observer.observe(document.body, {childList:true, subtree:true, attributes:true, characterData:true});
-  } else {
-      setTimeout(startObserver, 100);
-  }
-  };
-  startObserver();
-  
-  // 滚动监听（实时检测，节流 30ms 以降低频率但保持响应性）
-  let scrollTimer = null;
-  let lastReportTime = 0;
-  window.addEventListener('scroll', () => {
-  if (scrollTimer) return;
-  scrollTimer = setTimeout(() => {
-      const el = document.scrollingElement || document.documentElement;
-      const delta = Math.abs(el.scrollTop - lastScrollTop);
-      lastScrollTop = el.scrollTop;
-      if (delta > 10) {
-          pendingEvents.push({t:'scroll', d:delta});
-          // 实时汇报：如果距离上次汇报超过 50ms，立即发送（不等待批量窗口）
-          const now = Date.now();
-          if (now - lastReportTime > 50) {
-              console.log('[REFRESH_EVENTS]' + JSON.stringify(pendingEvents));
-              pendingEvents = [];
-              lastReportTime = now;
-          }
-      }
-      scrollTimer = null;
-  }, 30);  // 降低节流时间到 30ms，提高响应性
-  }, {passive:true});
-  
-  // 100ms 批量汇报（作为兜底，确保小事件也能被处理）
-  // 书籍页面已禁用burstMode，所以移除!burstMode条件
-  setInterval(() => {
-  if (pendingEvents.length > 0) {
-      console.log('[REFRESH_EVENTS]' + JSON.stringify(pendingEvents));
-      pendingEvents = [];
-      lastReportTime = Date.now();
-  }
-  }, 100);
-  
-  })();
-  )");
-          m_view->page()->runJavaScript(smartRefreshJs);
           
-          // Phase 5: 注入网络请求自动重试监听器（不重新加载页面）
-          const QString autoRetryJs = QStringLiteral(R"(
+          if (isWeReadBookPage) {
+              // Phase 5: 注入网络请求自动重试监听器（不重新加载页面，仅微信读书）
+              const QString autoRetryJs = QStringLiteral(R"(
   (function() {
   if (window.__WR_AUTO_RETRY_INSTALLED__) return;
   window.__WR_AUTO_RETRY_INSTALLED__ = true;
@@ -324,11 +456,12 @@ void WereadBrowser::initLoadSignals()
   })();
   )");
           m_view->page()->runJavaScript(autoRetryJs);
-          qInfo() << "[SMART_REFRESH] Injected JS monitor script (loadFinished, may be skipped if already injected from urlChanged)";
+          qInfo() << "[SMART_REFRESH] Injected auto-retry listener (loadFinished)";
+          }
   
           // 通知智能刷新管理器页面加载完成
-          if (m_smartRefresh) {
-              m_smartRefresh->triggerLoadFinished();
+          if (SmartRefreshManager *mgr = smartRefreshForPage()) {
+              mgr->triggerLoadFinished();
           }
   
           // 总是抓一次帧，避免 ready 失败导致必须点击才显示
@@ -347,10 +480,14 @@ void WereadBrowser::initLoadSignals()
                   const QVariantMap m = res.toMap();
                   const int bodyLen = m.value(QStringLiteral("bodyLen")).toInt();
                   const bool hasNuxt = m.value(QStringLiteral("hasNuxt")).toBool();
+                  const QString href = m.value(QStringLiteral("href")).toString();
                   if (m_integrityReloads < 2 && (bodyLen < 200 && !hasNuxt)) {
                       m_integrityReloads++;
                       qWarning() << "[INTEGRITY] fail bodyLen" << bodyLen << "hasNuxt" << hasNuxt
-                                 << "reload bypass cache attempt" << m_integrityReloads;
+                                 << "reload bypass cache attempt" << m_integrityReloads
+                                 << "href" << href << "url" << currentUrl;
+                      recordNavReason(QStringLiteral("integrity_reload"),
+                                      currentUrl);
                       m_view->page()->triggerAction(QWebEnginePage::ReloadAndBypassCache);
                       m_lastReloadTs = now;
                       return;
@@ -380,7 +517,10 @@ void WereadBrowser::initLoadSignals()
                   if (m_bookEarlyReloads < 1 && bodyLen == 0 && contLen == 0 && iframeText == 0) {
                       m_bookEarlyReloads++;
                       qWarning() << "[EARLY_RELOAD] book page empty, bypass cache attempt" << m_bookEarlyReloads
-                                 << "frames" << m.value(QStringLiteral("frames")).toInt();
+                                 << "frames" << m.value(QStringLiteral("frames")).toInt()
+                                 << "url" << currentUrl;
+                      recordNavReason(QStringLiteral("book_empty_reload"),
+                                      currentUrl);
                       m_view->page()->triggerAction(QWebEnginePage::ReloadAndBypassCache);
                       m_lastReloadTs = now;
                       return;

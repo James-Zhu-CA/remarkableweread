@@ -6,6 +6,8 @@
 #include <QWebEngineUrlRequestInfo>
 #include <QWebEngineUrlRequestInterceptor>
 
+class WereadBrowser;
+
 // 条件编译开关：取消注释下行以启用详细资源日志（会影响性能）
 // #define WEREAD_DEBUG_RESOURCES
 
@@ -13,10 +15,14 @@
 class ResourceInterceptor : public QWebEngineUrlRequestInterceptor {
   Q_OBJECT
 public:
-  explicit ResourceInterceptor(QObject *parent = nullptr)
-      : QWebEngineUrlRequestInterceptor(parent) {}
+  explicit ResourceInterceptor(WereadBrowser *browser,
+                               QObject *parent = nullptr)
+      : QWebEngineUrlRequestInterceptor(parent), m_browser(browser) {}
 
   void interceptRequest(QWebEngineUrlRequestInfo &info) override;
+
+private:
+  WereadBrowser *m_browser = nullptr;
 };
 
 #endif // RESOURCE_INTERCEPTOR_H

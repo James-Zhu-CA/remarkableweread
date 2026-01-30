@@ -125,6 +125,8 @@ public slots:
   void handleStateRequest();
 
 private:
+  void injectKeyWithModifiers(int key, Qt::KeyboardModifiers modifiers);
+
   void initProfileAndView(const QUrl &url);
   void initLoadSignals();
   void initNavigationSignals();
@@ -137,7 +139,8 @@ private:
   QWebEngineView *m_view = nullptr; // Active view shown to user
   CatalogWidget *m_catalogWidget = nullptr;
   FbRefreshHelper *m_fbRef = nullptr;
-  SmartRefreshManager *m_smartRefresh = nullptr; // 智能刷新管理器
+  SmartRefreshManager *m_smartRefreshWeRead = nullptr; // 智能刷新管理器（微信读书）
+  SmartRefreshManager *m_smartRefreshDedao = nullptr;  // 智能刷新管理器（得到）
   QTimer *m_idleCleanupTimer = nullptr;          // 空闲清理定时器
   QTimer *m_sessionSaveTimer = nullptr; // 定期保存会话状态定时器（每分钟）
   mutable qint64 m_lastSessionSaveTime =
@@ -146,9 +149,10 @@ private:
   // 已废弃：不再通过改 QTFB_KEY / 断开 qtfb
   // 连接来“交回系统”，而是走后台模式（停止刷新/渲染）
   QWebEngineProfile *m_profile = nullptr;
-  // UA 控制：微信书籍页用 Qt 默认 UA，其余用配置 UA
+  // UA 控制：微信读书与得到分开配置，按页面类型切换
   QString m_uaNonWeRead;
   QString m_uaWeReadBook;
+  QString m_uaDedaoBook;
   QString m_kindleUA;
   QString m_ipadMiniUA;
   QString m_desktopChromeUA; // 桌面版Chrome UA（用于微信读书首页）
@@ -202,6 +206,7 @@ private:
   bool m_textScanDone = false;
   bool m_fontLogged = false;
   bool m_defaultSettingsScriptInstalled = false;
+  bool m_dedaoDefaultSettingsScriptInstalled = false;
   bool m_chapterObserverScriptInstalled = false;
   int m_rescueSeq = 0;
   bool m_iframeFixApplied = false;
@@ -211,6 +216,9 @@ private:
   QUdpSocket m_stateResponder;
   QUrl currentUrl;
   QString m_prevUrlStr;
+  QString m_lastNavReason;
+  QUrl m_lastNavReasonTarget;
+  qint64 m_lastNavReasonTs = 0;
   QString m_lastDedaoReaderUrl;
   bool m_isBookPage = false;
   bool m_prevIsBookPage = false;
@@ -219,6 +227,16 @@ private:
   qint64 m_lastChapterInfosRefreshMs = 0;
   quint64 m_catalogClickSeq = 0;
   bool m_dedaoProbed = false;
+  bool m_dedaoStyleLogged = false;
+  bool m_dedaoCatalogScanning = false;
+  int m_dedaoCatalogScanRounds = 0;
+  int m_dedaoCatalogScanStepPx = 0;
+  int m_dedaoCatalogMaxScrollHeight = 0;
+  int m_dedaoCatalogStableScrollHeightRounds = 0;
+  QString m_dedaoCatalogScanKey;
+  QString m_dedaoCatalogCacheKey;
+  QJsonArray m_dedaoCatalogCache;
+  bool m_dedaoCatalogJumpPending = false;
   bool m_navigating = false; // 翻页防抖锁
   int m_navSequence = 0;     // 翻页序列号，防止僵尸回调
   qint64 m_navStartTime = 0; // 翻页开始时间（用于检测慢速翻页）
@@ -229,6 +247,9 @@ private:
   bool m_inputDomObserved = false;   // 输入注入后是否观察到DOM变化
   qint64 m_lastDomEventMs = 0;       // 最近一次DOM事件时间
   int m_lastDomEventScore = 0;       // 最近一次DOM事件分数
+  qint64 m_lastMenuTapMs = 0;
+  QPointF m_lastMenuTapPos;
+  qint64 m_lastServiceToggleMs = 0;
   int m_lastPageTurnSeqNotified = 0; // 翻页节拍是否已记录
   int m_lastPageTurnEffectSeq = 0;   // 最近一次翻页生效来源记录
   qint64 m_lastTouchTs = 0;
@@ -243,6 +264,11 @@ private:
   bool m_isAdjustingFont = false;
 
 public:
+  QString navReason() const { return m_lastNavReason; }
+  QUrl navReasonTarget() const { return m_lastNavReasonTarget; }
+  qint64 navReasonTs() const { return m_lastNavReasonTs; }
+  QUrl currentUrlForLog() const { return currentUrl; }
+
   // 会话恢复相关方法（public，供 main() 调用）
   static QString getSessionStatePath();
   static QString getExitReasonPath();
@@ -259,8 +285,15 @@ public:
   bool isKindleUA() const;
   bool isWeReadKindleMode() const;
   bool isDedaoBook() const;
+  bool isDedaoSite() const;
   QWebEngineView *getView() const;
   SmartRefreshManager *getSmartRefresh() const;
+  SmartRefreshManager *getSmartRefreshWeRead() const;
+  SmartRefreshManager *getSmartRefreshDedao() const;
+  SmartRefreshManager *smartRefreshForUrl(const QUrl &url) const;
+  SmartRefreshManager *smartRefreshForPage() const;
+  void handleSmartRefreshEvents(const QString &json);
+  void handleSmartRefreshBurstEnd();
   void scheduleBookCaptures(bool force = false);
   void restartCaptureLoop();
   void openDedaoMenu();
@@ -280,6 +313,7 @@ private:
   // UA
   void updateUserAgentForUrl(const QUrl &url);
   void installWeReadDefaultSettingsScript();
+  void installDedaoDefaultSettingsScript();
   void ensureDedaoDefaults();
   void scheduleCapture(int delayMs = 100);
   // 仅针对微信读书书籍页：对齐滚动到行高整数倍并添加轻微留白，避免半截行
@@ -289,6 +323,18 @@ private:
   // 应用书籍页样式修复和视觉诊断（从 Ready 机制中提取）
   void applyBookPageFixes();
   void applyWeReadFontOverrideIfNeeded();
+  void applyDedaoFontOverrideIfNeeded();
+  void scheduleDedaoUiFixes();
+  void runDedaoUiFixes();
+  void scheduleWeReadUiFixes();
+  void runWeReadUiFixes();
+  void openDedaoCatalog();
+  void fetchDedaoCatalog();
+  void handleDedaoCatalogClick(int index, const QString &uid);
+  void advanceDedaoCatalogScan(bool reset);
+  void scheduleDedaoCatalogScrape(int delayMs);
+  void hideDedaoNativeCatalog();
+  void recordNavReason(const QString &reason, const QUrl &target);
 
   void handleJsUnexpected(const QString &message, const QString &source);
 
@@ -317,11 +363,14 @@ private:
   void runDedaoProbe();
   void installChapterObserver();
   void installChapterObserverScript();
+  void installSmartRefreshScript(const QString &flagName);
+  QString buildSmartRefreshScript(const QString &flagName) const;
 
 public:
   void cycleUserAgentMode();
   // 无需updateUaButtonText，已删除UA按钮
   void logUrlState(const QString &tag = QString());
+  void logHistoryState(const QString &tag = QString());
 
   // 简易探针：记录当前 URL、滚动容器和主要正文节点
   void logPageProbe(const QString &tag = QString());
@@ -343,6 +392,11 @@ public:
   void weReadScroll(bool forward);
   void triggerStalledRescue(const QString &reason, int chapterLen, int bodyLen,
                             int pollCount);
+
+  // Script accessors (implemented in weread_browser_scripts.cpp)
+  static const QString &getChapterObserverScript();
+  static const QString &getDefaultSettingsScript();
+  static const QString &getDedaoDefaultSettingsScript();
 };
 
 #endif // WEREAD_BROWSER_H

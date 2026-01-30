@@ -42,12 +42,13 @@ void WereadBrowser::updateUserAgentForUrl(const QUrl &url) {
                           u.contains(QStringLiteral("/web/reader/"));
   const bool dedaoBook = u.contains(QStringLiteral("dedao.cn")) &&
                          u.contains(QStringLiteral("/ebook/reader"));
+  const bool dedaoSite = u.contains(QStringLiteral("dedao.cn"));
   // 检测是否是微信读书首页（weread.qq.com但不是书籍页）
   const bool weReadHome =
       u.contains(QStringLiteral("weread.qq.com")) && !weReadBook;
   QString targetUA;
-  if (dedaoBook) {
-    targetUA = m_kindleUA.isEmpty() ? m_uaNonWeRead : m_kindleUA;
+  if (dedaoSite) {
+    targetUA = m_uaDedaoBook.isEmpty() ? m_uaNonWeRead : m_uaDedaoBook;
   } else if (weReadBook) {
     targetUA = m_uaWeReadBook;
   } else if (weReadHome) {
@@ -68,22 +69,28 @@ void WereadBrowser::updateUserAgentForUrl(const QUrl &url) {
   m_profile->setHttpUserAgent(targetUA);
   m_currentUA = targetUA;
   m_uaMode = detectUaMode(m_currentUA);
+  const char *uaScene = "non-weread";
+  if (dedaoSite) {
+    uaScene = dedaoBook ? "dedao-book" : "dedao-site";
+  } else if (weReadBook) {
+    uaScene = "weread-book";
+  } else if (weReadHome) {
+    uaScene = "weread-home";
+  }
   qInfo() << "[UA] switched"
-          << (weReadBook ? "weread-book"
-                         : (weReadHome ? "weread-home" : "non-weread"))
-          << targetUA;
+          << uaScene << targetUA;
 }
 
 void WereadBrowser::ensureDedaoDefaults() {
   if (!isDedaoBook() || !m_view || !m_view->page())
     return;
-  // 强制 Kindle UA（需求：进入得到书籍页默认 UA 为 Kindle）
-  if (!m_kindleUA.isEmpty() && m_profile &&
-      m_profile->httpUserAgent() != m_kindleUA) {
-    m_profile->setHttpUserAgent(m_kindleUA);
-    m_currentUA = m_kindleUA;
+  // 强制得到书籍页 UA 为移动端
+  if (!m_uaDedaoBook.isEmpty() && m_profile &&
+      m_profile->httpUserAgent() != m_uaDedaoBook) {
+    m_profile->setHttpUserAgent(m_uaDedaoBook);
+    m_currentUA = m_uaDedaoBook;
     m_uaMode = detectUaMode(m_currentUA);
-    qInfo() << "[DEDAO] UA forced to kindle";
+    qInfo() << "[DEDAO] UA forced to mobile";
   }
   // 缩放：2.0
   const qreal targetZoom = 2.0;
@@ -226,8 +233,8 @@ void WereadBrowser::applyBookPageFixes() {
           // 触发 CONTENT_READY 高优先级事件（不受递增阈值限制）
           if (hasText && !m_contentReadyTriggered) {
             m_contentReadyTriggered = true;
-            if (m_smartRefresh) {
-              m_smartRefresh->triggerContentReady();
+            if (SmartRefreshManager *mgr = smartRefreshForPage()) {
+              mgr->triggerContentReady();
               qInfo() << "[CONTENT_READY] Content ready detected, triggering "
                          "refresh"
                       << "bodyLen="
@@ -418,8 +425,10 @@ void WereadBrowser::handleJsUnexpected(const QString &message,
     return;
   }
   if (m_view && m_view->page()) {
-    qWarning() << "[JS_UNEXPECTED] triggering ReloadAndBypassCache";
+    qWarning() << "[JS_UNEXPECTED] triggering ReloadAndBypassCache url"
+               << currentUrl;
     m_jsReloadCooldownMs = now;
+    recordNavReason(QStringLiteral("js_unexpected_reload"), currentUrl);
     m_view->page()->triggerAction(QWebEnginePage::ReloadAndBypassCache);
   }
 }

@@ -86,10 +86,9 @@ docs/
 # Keep only essential documentation
 !docs/lessons_learned.md
 
-# Internal development documentation
-AGENTS.md
-GITHUB_PUBLISH.md
-READY_TO_PUBLISH.md
+# Internal development documentation moved to .git/info/exclude
+# (allows AI access while keeping files out of Git)
 
 # Release binaries (too large for GitHub)
 release/
+*.ttf

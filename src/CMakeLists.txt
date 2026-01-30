@@ -32,6 +32,7 @@ set(SOURCES
     app/weread_browser_part4.cpp
     app/weread_browser_part5.cpp
     app/weread_browser_part6.cpp
+    app/weread_browser_scripts.cpp
 )
 
 # 添加可执行文件

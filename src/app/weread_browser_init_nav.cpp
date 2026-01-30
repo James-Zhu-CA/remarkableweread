@@ -5,6 +5,43 @@ void WereadBrowser::initNavigationSignals()
   connect(m_view->page(), &QWebEnginePage::navigationRequested, this,
           [this](QWebEngineNavigationRequest &request) {
       const QString target = request.url().toString();
+      const qint64 now = QDateTime::currentMSecsSinceEpoch();
+      const qint64 reasonAge =
+          m_lastNavReasonTs > 0 ? (now - m_lastNavReasonTs) : -1;
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      const QUrl requestedUrl =
+          (m_view && m_view->page()) ? m_view->page()->requestedUrl() : QUrl();
+      qInfo() << "[NAV_REQ]"
+              << "url" << target
+              << "type" << request.navigationType()
+              << "mainFrame" << request.isMainFrame()
+              << "hasFormData" << request.hasFormData()
+              << "from" << currentUrl
+              << "pageUrl" << pageUrl
+              << "requestedUrl" << requestedUrl
+              << "reason" << m_lastNavReason
+              << "reasonTarget" << m_lastNavReasonTarget
+              << "reasonAgeMs" << reasonAge;
+      const bool isReload =
+          request.navigationType() ==
+          QWebEngineNavigationRequest::ReloadNavigation;
+      const bool isMenuToggle =
+          m_lastNavReason == QStringLiteral("menu_toggle_service");
+      const QString targetStr = request.url().toString();
+      const bool isWeReadHome =
+          targetStr == QStringLiteral("https://weread.qq.com/") ||
+          targetStr == QStringLiteral("https://weread.qq.com");
+      const bool targetIsDedao =
+          m_lastNavReasonTarget.toString().contains(
+              QStringLiteral("dedao.cn"));
+      if (request.isMainFrame() && isReload && isMenuToggle && targetIsDedao &&
+          isWeReadHome && reasonAge >= 0 && reasonAge <= 2000) {
+          qWarning() << "[NAV_GUARD] block reload to weread after menu toggle"
+                     << "url" << targetStr << "reasonAgeMs" << reasonAge;
+          request.reject();
+          return;
+      }
       const bool targetDedaoDetail = target.contains(QStringLiteral("dedao.cn")) &&
                                      target.contains(QStringLiteral("/ebook/detail"));
       // 仅当当前就在 dedao 阅读页时才拦截详情跳转，其他页面允许正常打开详情
@@ -18,13 +55,57 @@ void WereadBrowser::initNavigationSignals()
           m_allowDedaoDetailOnce = false;
       }
   });
+
+  connect(m_view->page(), &QWebEnginePage::urlChanged, this,
+          [this](const QUrl &url) {
+      const qint64 now = QDateTime::currentMSecsSinceEpoch();
+      const qint64 reasonAge =
+          m_lastNavReasonTs > 0 ? (now - m_lastNavReasonTs) : -1;
+      const QUrl viewUrl = m_view ? m_view->url() : QUrl();
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      const QUrl requestedUrl =
+          (m_view && m_view->page()) ? m_view->page()->requestedUrl() : QUrl();
+      qInfo() << "[PAGE] urlChanged" << url << "ts" << now
+              << "viewUrl" << viewUrl
+              << "pageUrl" << pageUrl
+              << "requestedUrl" << requestedUrl
+              << "reason" << m_lastNavReason
+              << "reasonTarget" << m_lastNavReasonTarget
+              << "reasonAgeMs" << reasonAge;
+      logHistoryState(QStringLiteral("pageUrlChanged"));
+  });
+
+  connect(m_view->page(), &QWebEnginePage::titleChanged, this,
+          [this](const QString &title) {
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      qInfo() << "[PAGE] titleChanged" << title << "pageUrl" << pageUrl;
+  });
+
+  connect(m_view->page(), &QWebEnginePage::iconUrlChanged, this,
+          [this](const QUrl &iconUrl) {
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      qInfo() << "[PAGE] iconUrlChanged" << iconUrl << "pageUrl" << pageUrl;
+  });
   
   connect(m_view, &QWebEngineView::urlChanged, this, [this](const QUrl &url){
       const QString oldUrl = currentUrl.toString();
       const QString newUrlStr = url.toString();
       currentUrl = url;
       const qint64 now = QDateTime::currentMSecsSinceEpoch();
-      qInfo() << "[TIMING] urlChanged" << url << "ts" << now << "from" << oldUrl;
+      const qint64 reasonAge =
+          m_lastNavReasonTs > 0 ? (now - m_lastNavReasonTs) : -1;
+      const QUrl pageUrl =
+          (m_view && m_view->page()) ? m_view->page()->url() : QUrl();
+      const QUrl requestedUrl =
+          (m_view && m_view->page()) ? m_view->page()->requestedUrl() : QUrl();
+      qInfo() << "[TIMING] urlChanged" << url << "ts" << now << "from" << oldUrl
+              << "pageUrl" << pageUrl << "requestedUrl" << requestedUrl
+              << "reason" << m_lastNavReason
+              << "reasonTarget" << m_lastNavReasonTarget
+              << "reasonAgeMs" << reasonAge;
       
       // 重置内容重试状态（URL变化时）
       m_contentRetryCount = 0;
@@ -55,6 +136,8 @@ void WereadBrowser::initNavigationSignals()
           qWarning() << "[NAV_GUARD] block dedao detail urlChanged" << newUrlStr << "fallback" << fallback;
           if (m_view) {
               m_view->stop();
+              recordNavReason(QStringLiteral("dedao_detail_fallback"),
+                              QUrl(fallback));
               m_view->setUrl(QUrl(fallback));
           }
           return;
@@ -64,11 +147,17 @@ void WereadBrowser::initNavigationSignals()
           m_allowDedaoDetailOnce = false;
       }
       logUrlState(QStringLiteral("urlChanged"));
+      logHistoryState(QStringLiteral("viewUrlChanged"));
       
-      // 更新智能刷新管理器的书籍页面状态
-      const bool isBook = isWeReadBook() || isDedaoBook();
-      if (m_smartRefresh) {
-          m_smartRefresh->setBookPage(isBook);
+      // 更新智能刷新管理器的书籍页面状态（按站点拆分）
+      const bool isWeReadBookPage = isWeReadBook();
+      const bool isDedaoBookPage = isDedaoBook();
+      const bool isDedaoSitePage = isDedaoSite();
+      if (m_smartRefreshWeRead) {
+          m_smartRefreshWeRead->setBookPage(isWeReadBookPage);
+      }
+      if (m_smartRefreshDedao) {
+          m_smartRefreshDedao->setBookPage(isDedaoBookPage);
       }
       
       // 在urlChanged时设置cookie（如果是微信读书域名，包括首页和书籍页面）
@@ -83,7 +172,7 @@ void WereadBrowser::initNavigationSignals()
           qInfo() << "[DEFAULT] Set theme cookie to white via CookieStore (urlChanged, url=" << newUrlStr << ")";
       }
       
-      if (isBook) {
+      if (isWeReadBookPage || isDedaoBookPage) {
           m_bookEnterTs = now;
           qInfo() << "[TIMING] bookEnter ts" << now << "url" << url;
           // 进入书籍时立即启动抓帧循环，避免需手动触发
@@ -92,119 +181,39 @@ void WereadBrowser::initNavigationSignals()
           if (isWeReadBook()) {
               installChapterObserver();
           }
-          
+      }
+
+      if (isWeReadBookPage || isDedaoSitePage) {
           // 提前注入智能刷新 JS 监听器（从 urlChanged 开始，不等待 loadFinished）
           // 这样可以更早地捕获 DOM 变化和滚动事件
-          const QString smartRefreshJs = QStringLiteral(R"(
-  (function() {
-  if (window.__SMART_REFRESH_INSTALLED__) {
-  return;
-  }
-  window.__SMART_REFRESH_INSTALLED__ = true;
-  
-  let pendingEvents = [];
-  let burstMode = false, burstTimeout = null;
-  let lastScrollTop = 0;
-  let lastReportTime = 0;
-  
-  // MutationObserver 检测 DOM 变化（优化：减少getBoundingClientRect调用，延迟处理区域计算）
-  let pendingMutations = [];
-  const processMutations = () => {
-  if (pendingMutations.length === 0) return;
-  const mutations = pendingMutations;
-  pendingMutations = [];
-  
-  let score = 0;
-  let regions = [];
-  for (const m of mutations) {
-      if (m.type === 'childList') {
-          score += m.addedNodes.length * 10 + m.removedNodes.length * 10;
-          // 优化：限制区域计算，只处理前5个节点，避免大量getBoundingClientRect调用影响点击响应
-          const maxNodes = 5;
-          let nodeCount = 0;
-          for (const n of m.addedNodes) {
-              if (nodeCount >= maxNodes) break;
-              if (n.nodeType === 1 && n.getBoundingClientRect) {
-                  try {
-                      const r = n.getBoundingClientRect();
-                      if (r.width > 0 && r.height > 0) {
-                          regions.push({x:r.x|0, y:r.y|0, w:Math.ceil(r.width), h:Math.ceil(r.height)});
-                          nodeCount++;
-                      }
-                  } catch(e) {}
-              }
+          QString smartRefreshFlag;
+          if (isWeReadBookPage) {
+              smartRefreshFlag = QStringLiteral("__SMART_REFRESH_WR_INSTALLED__");
+          } else if (isDedaoBookPage) {
+              smartRefreshFlag =
+                  QStringLiteral("__SMART_REFRESH_DEDAO_READER_INSTALLED__");
+          } else {
+              smartRefreshFlag =
+                  QStringLiteral("__SMART_REFRESH_DEDAO_SITE_INSTALLED__");
           }
-      } else if (m.type === 'attributes') score += 2;
-      else if (m.type === 'characterData') score += 3;
-  }
-  
-  if (score > 0) {
-      pendingEvents.push({t:'dom', s:score, r:regions});
-  }
-  };
-  
-  const observer = new MutationObserver((mutations) => {
-  // 批量收集mutations，延迟处理以减少对点击响应的影响
-  pendingMutations.push(...mutations);
-  // 使用requestIdleCallback延迟处理，如果浏览器不支持则使用setTimeout
-  if (window.requestIdleCallback) {
-      requestIdleCallback(processMutations, {timeout: 50});
-  } else {
-      setTimeout(processMutations, 0);
-  }
-  });
-  
-  // 延迟启动观察器，等待 body 准备就绪
-  const startObserver = () => {
-  if (document.body) {
-      observer.observe(document.body, {childList:true, subtree:true, attributes:true, characterData:true});
-  } else {
-      setTimeout(startObserver, 100);
-  }
-  };
-  startObserver();
-  
-  // 滚动监听（实时检测，节流 30ms 以降低频率但保持响应性）
-  let scrollTimer = null;
-  window.addEventListener('scroll', () => {
-  if (scrollTimer) return;
-  scrollTimer = setTimeout(() => {
-      const el = document.scrollingElement || document.documentElement;
-      const delta = Math.abs(el.scrollTop - lastScrollTop);
-      lastScrollTop = el.scrollTop;
-      if (delta > 10) {
-          pendingEvents.push({t:'scroll', d:delta});
-          // 实时汇报：如果距离上次汇报超过 50ms，立即发送（不等待批量窗口）
-          const now = Date.now();
-          if (now - lastReportTime > 50) {
-              console.log('[REFRESH_EVENTS]' + JSON.stringify(pendingEvents));
-              pendingEvents = [];
-              lastReportTime = now;
-          }
-      }
-      scrollTimer = null;
-  }, 30);  // 降低节流时间到 30ms，提高响应性
-  }, {passive:true});
-  
-  // 100ms 批量汇报（作为兜底，确保小事件也能被处理）
-  // 书籍页面已禁用burstMode，所以移除!burstMode条件
-  setInterval(() => {
-  if (pendingEvents.length > 0) {
-      console.log('[REFRESH_EVENTS]' + JSON.stringify(pendingEvents));
-      pendingEvents = [];
-      lastReportTime = Date.now();
-  }
-  }, 100);
-  
-  })();
-  )");
+          installSmartRefreshScript(smartRefreshFlag);
+          const QString smartRefreshJs = buildSmartRefreshScript(smartRefreshFlag);
+          const bool injectWeReadRetry = isWeReadBookPage;
           // 延迟 100ms 注入，确保页面开始加载
-          QTimer::singleShot(100, this, [this, smartRefreshJs]() {
+          QTimer::singleShot(100, this,
+                             [this, smartRefreshJs, smartRefreshFlag,
+                              injectWeReadRetry]() {
               if (m_view && m_view->page()) {
                   m_view->page()->runJavaScript(smartRefreshJs);
-                  qInfo() << "[SMART_REFRESH] Injected JS monitor script from urlChanged (early injection)";
+                  qInfo() << "[SMART_REFRESH] Injected JS monitor script from "
+                             "urlChanged (early injection)"
+                          << smartRefreshFlag;
                   
-                  // 同时注入自动重试监听器
+                  if (!injectWeReadRetry) {
+                      return;
+                  }
+
+                  // 同时注入自动重试监听器（仅微信读书）
                   const QString autoRetryJs = QStringLiteral(R"(
   (function() {
   if (window.__WR_AUTO_RETRY_INSTALLED__) return;
@@ -308,6 +317,10 @@ void WereadBrowser::initNavigationSignals()
       }
       updateUserAgentForUrl(url);
       sendBookState();
+      if (isDedaoSite()) {
+        scheduleDedaoUiFixes();
+      }
+      scheduleWeReadUiFixes();
   });
   // 允许通过环境变量加载本地保存的 wr.html 以验证解析差异
 }
